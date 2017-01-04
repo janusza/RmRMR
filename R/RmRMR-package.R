@@ -3,10 +3,15 @@
 #' @docType package
 NULL
 
+#' @useDynLib RmRMR
+
 # this is IMPORTANT if you want data.table to work
 .datatable.aware=TRUE
 
 #' @import parallel
+NULL
+
+#' @import Rcpp
 NULL
 
 #' @importFrom data.table data.table

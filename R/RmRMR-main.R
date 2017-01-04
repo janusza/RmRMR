@@ -17,6 +17,9 @@
 #' @param dependencyF a function for computing dependencies between attributes and between
 #'                    attributes and the decisions. The default is an absolute value of
 #'                    Pearson's correlation (function \code{corrDependency}).
+#' @param randomnessTest a function implementing a randomness test used as a stopping criteria.
+#'                       The default (\code{permutationTest}) is a permutation test based on 
+#'                       random probes.
 #' @param Nprobes an integer specifying the number of probes to use in estimation of
 #'                attribute irrelevance (for stopping criteria). The default is \code{1000}.
 #' @param allowedRandomness a numeric value specifying allowed attribute irrelevance
@@ -39,7 +42,11 @@
 #' #############################################
 #' data(methaneSampleData)
 #'
-#' ## an experiment on a sample from methane competition data (IJCRS'16)
+#' ## an experiment on a sample from the data used in a data mining competition - 
+#' ## IJCRS'15 Data Challenge: Mining Data from Coal Mines 
+#' ## (https://knowledgepit.fedcsis.org/contest/view.php?id=109).
+#' ## The whole data set can be downloaded from the competition web page.
+#' 
 #' mrmrAttrs = mRMRfs(dataT = methaneData$methaneTraining,
 #'                    target = methaneData$methaneTrainingLabels[, as.integer(V2 == 'warning')],
 #'                    dependencyF = corrDependency)
@@ -55,17 +62,24 @@
 #' caTools::colAUC(preds, methaneData$methaneTestLabels[, V2])
 #'
 #' @export
-mRMRfs = function(dataT, target, dependencyF = corrDependency,
+mRMRfs = function(dataT, target, 
+                  dependencyF = corrDependency,
+                  randomnessTest = permutationTest,
                   Nprobes = 1000, allowedRandomness = 0.01, nMax = 20,
                   nCores = 1, ...) {
 
+  if(any(is.na(dataT)) | any(sapply(as.list(dataT), function(x) any(is.infinite(x)))))
+    stop("Data table contains missing or infinite values - computations aborted.")
+  
   selectedAttrsIdx = integer()
   attrScores = numeric()
   attrsIdxs = 1:ncol(dataT)
   varScores = as.numeric(dataT[, unlist(mclapply(.SD, dependencyF,
-                                                 target, mc.cores = nCores)),
+                                                 unlist(target), 
+                                                 mc.cores = nCores)),
                                .SDcols=attrsIdxs])
 
+  #print(colnames(dataT)[order(varScores, decreasing = TRUE)][1:nMax])
   #select the first attribute
   selectedAttrsIdx[1] = attrsIdxs[which.max(varScores)]
   attrsIdxs = attrsIdxs[-selectedAttrsIdx[length(selectedAttrsIdx)]]
@@ -84,15 +98,16 @@ mRMRfs = function(dataT, target, dependencyF = corrDependency,
                                       mc.cores = nCores),
                              .SDcols = attrsIdxs]
     maxScoreIdx = which.max(dependencyScores)
-
+    
     #sprawdzić kryterium stopu (probe-y)
-    probeScores = replicate(Nprobes,
-                            {dependencyF(unlist(dataT[sample(nrow(dataT)),
-                                                      attrsIdxs[maxScoreIdx],
-                                                      with = FALSE]),
-                                         target)})
+    probeScore = randomnessTest(unlist(dataT[sample(nrow(dataT)),
+                                             attrsIdxs[maxScoreIdx],
+                                             with = FALSE]),
+                                unlist(target),
+                                varScores[maxScoreIdx],
+                                dependencyF, ...)
 
-    if(mean(probeScores > varScores[maxScoreIdx]) > allowedRandomness ||
+    if(probeScore > allowedRandomness ||
        dependencyScores[maxScoreIdx] < 0) {
       endFlag = TRUE
     } else {
@@ -100,7 +115,7 @@ mRMRfs = function(dataT, target, dependencyF = corrDependency,
 
       attrsIdxs = attrsIdxs[-maxScoreIdx]
       varScores = varScores[-maxScoreIdx]
-
+      
       if(length(selectedAttrsIdx) >= nMax) endFlag = TRUE
     }
   }
